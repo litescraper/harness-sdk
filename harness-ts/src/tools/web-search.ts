@@ -114,6 +114,45 @@ export function makeExaWebSearch(): Tool {
   return searchTool(exaBackend())
 }
 
+/** Build a web search tool using `LITESCRAPE_API_KEY` and optional `LITESCRAPE_BASE_URL`. */
+export function makeLitescrapeWebSearch(): Tool {
+  return searchTool(async (query, maxResults) => {
+    const key = process.env.LITESCRAPE_API_KEY
+    if (!key) {
+      throw new WebSearchError('LITESCRAPE_API_KEY is required')
+    }
+    const baseUrl = process.env.LITESCRAPE_BASE_URL || 'https://api.litescrape.com'
+    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/search`, {
+      method: 'POST',
+      headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: maxResults }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      redirect: 'error',
+    })
+    if (!response.ok) {
+      throw new WebSearchError(`Litescrape returned HTTP ${response.status}`)
+    }
+    const data = z
+      .object({
+        organic: z
+          .array(
+            z.object({
+              title: z.string().default(''),
+              link: z.string(),
+              snippet: z.string().default(''),
+            })
+          )
+          .default([]),
+      })
+      .parse(await response.json())
+    return data.organic.slice(0, maxResults).map((item) => ({
+      title: item.title,
+      url: item.link,
+      snippet: item.snippet.slice(0, SNIPPET_CHARS),
+    }))
+  })
+}
+
 /** The `web_search` tool served by Exa (`EXA_API_KEY` is read per call). */
 export const exaWebSearch = makeExaWebSearch()
 
